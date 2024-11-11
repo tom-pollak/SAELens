@@ -2,7 +2,6 @@ from dataclasses import fields
 from typing import Optional
 
 import pytest
-
 from sae_lens import __version__
 from sae_lens.config import CacheActivationsRunnerConfig, LanguageModelSAERunnerConfig
 from sae_lens.sae import SAEConfig
@@ -160,17 +159,30 @@ def test_sae_training_runner_config_seqpos(
 def test_cache_activations_runner_config_seqpos(
     seqpos_slice: tuple[int, int], expected_error: Optional[AssertionError]
 ):
-    context_size = 10
     if expected_error is AssertionError:
         with pytest.raises(expected_error):
             CacheActivationsRunnerConfig(
-                seqpos_slice=seqpos_slice,
-                context_size=context_size,
+                hf_dataset_path="",
+                model_name="",
+                model_batch_size=1,
+                hook_name="",
+                final_hook_layer=0,
+                d_in=1,
+                dataset_num_rows=1,
+                context_size=10,
+                activation_store_kwargs=dict(seqpos_slice=seqpos_slice),
             )
     else:
         CacheActivationsRunnerConfig(
-            seqpos_slice=seqpos_slice,
-            context_size=context_size,
+            hf_dataset_path="",
+            model_name="",
+            model_batch_size=1,
+            hook_name="",
+            final_hook_layer=0,
+            d_in=1,
+            dataset_num_rows=1,
+            context_size=10,
+            activation_store_kwargs=dict(seqpos_slice=seqpos_slice),
         )
 
 
