@@ -144,10 +144,10 @@ class CachedActivationsStore:
         try:
             return next(self.dl_it)
         except StopIteration:
+            self.reset_input_dataset()
             if raise_on_epoch_end:
-                raise StopIteration("Ran out of cached activations.")
+                raise StopIteration("Ran out of cached activations, refreshing dataset.")
             else:
-                self.reset_input_dataset()
                 return next(self.dl_it)
 
     def __len__(self):

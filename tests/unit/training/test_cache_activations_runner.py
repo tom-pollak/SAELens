@@ -90,7 +90,7 @@ def test_cache_activations_runner(tmp_path: Path):
 
 
 def test_load_cached_activations(tmp_path: Path):
-    cfg = _default_cfg(tmp_path, batch_size=32)
+    cfg = _default_cfg(tmp_path, dataset_num_rows=64)
     runner = CacheActivationsRunner(cfg)
     ds = runner.run()
     ds.set_format("torch")
@@ -113,7 +113,7 @@ def test_load_cached_activations(tmp_path: Path):
 
 
 def test_load_cached_activations_from_config_refreshes_when_runs_out(tmp_path: Path):
-    cfg = _default_cfg(tmp_path, batch_size=32)
+    cfg = _default_cfg(tmp_path, dataset_num_rows=64)
     runner = CacheActivationsRunner(cfg)
     runner.run()
 
@@ -127,7 +127,7 @@ def test_load_cached_activations_from_config_refreshes_when_runs_out(tmp_path: P
             1,
             cfg.d_in,
         )
-    with pytest.raises(StopIteration):
+    with pytest.raises(StopIteration, match="Ran out of cached activations, refreshing dataset."):
         activations_store.next_batch(raise_on_epoch_end=True)
 
     for _ in range(len(activations_store)):
