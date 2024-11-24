@@ -4,10 +4,9 @@ import os
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
-import einops
 import numpy as np
 import torch
-from datasets import Dataset
+from datasets import Dataset, Sequence, Value
 from jaxtyping import Float
 from sae_lens.config import CacheActivationsRunnerConfig
 from tqdm import tqdm
@@ -16,12 +15,6 @@ from tqdm import tqdm
 class CachedActivationsStore:
     """
     Given a path to a cached activations dataset, create a dataloader that yields batches of shape (batch_size, hook, seq_len, d_model)
-
-    I think this has a problem at the moment, each row is a 2D array (context_size, d_in),
-    each batch is a 3D array (batch_size, context_size, d_in)
-
-    Even shuffling a batch to (batch_size * context_size, d_in),
-    this is not a perfectly shuffled since it will include the full context of each sequence.
 
     Args:
         cached_activations_path: Path to a cached activations dataset
@@ -86,15 +79,40 @@ class CachedActivationsStore:
 
         feats = self.ds.features
         assert feats is not None
-        self.context_size, self.d_in = feats[list(feats.keys())[0]].shape
+        _first_feat = next(iter(feats.values()))
+        self.context_size, self.d_in = _first_feat.shape
+        self.dtype = _first_feat.dtype
         for feat in feats.values():
-            if feat.shape != (self.context_size, self.d_in):
-                raise ValueError(
-                    f"All features must have the same (context_size, d_in). Got different shapes: {(self.context_size, self.d_in)} vs {feat.shape}."
-                )
+            assert feat.shape == (self.context_size, self.d_in), "All features must have the same (context_size, d_in)"
+            assert feat.dtype == self.dtype, "All features must have the same dtype"
 
         self.dl = self._mk_cached_dl(self.dl_kwargs)
         self.reset_input_dataset()
+
+    def _flatten_ds(self, ds: Dataset) -> Dataset:
+        """
+        I think this has a problem at the moment, each row is a 2D array (context_size, d_in),
+        each batch is a 3D array (batch_size, context_size, d_in)
+
+        Even shuffling a batch to (batch_size * context_size, d_in),
+        this is not a perfectly shuffled since it will include the full context of each sequence.
+
+        """
+        def _expand_rows(batch: dict[str, list[Any]]) -> dict[str, list[Any]]:
+            return {
+                name: [row for arr in arrays for row in arr]
+                for name, arrays in batch.items()
+            }
+
+        columns = ds.column_names
+        ds = ds.map(
+            _expand_rows,
+            # remove_columns=columns,
+            batched=True,
+        )
+        for column in columns:
+            ds = ds.cast_column(column, Sequence(feature=Value(dtype=self.dtype), length=self.d_in))
+        return ds
 
     def _cached_dl_collate_fn(
         self,
@@ -103,9 +121,9 @@ class CachedActivationsStore:
         """
         Takes a batch of a rows from dataset with columns of different features from the same input sequence
 
-        batch = [{hook_name: [seq_len, d_model]}]
+        batch = [{ hook_name: tensor(d_model) }]
 
-        Transforms into a single batch with shape: (hook, seq_len, d_model)
+        Transforms into a single batch with shape: (batch, hook, d_model)
         """
         acts = torch.stack([
             torch.stack(list(d.values())) for d in batch
@@ -114,19 +132,17 @@ class CachedActivationsStore:
             acts,
             "batch hook seq_len d_model -> (batch seq_len) hook d_model",
         )
+        return acts
 
     def _mk_cached_dl(
         self,
         dl_kwargs: dict[str, Any],
     ) -> torch.utils.data.DataLoader[torch.Tensor]:
-        assert (
-            self.batch_size >= self.context_size and
-            self.batch_size % self.context_size == 0
-        ), "batch_size must be divisible by context_size"
-        dl_batch_size = self.batch_size // self.context_size
+        flattened_ds = self._flatten_ds(self.ds)
+        assert len(flattened_ds) > self.batch_size, "Flattened dataset must have more rows than batch_size"
         return torch.utils.data.DataLoader(
-            self.ds,  # type: ignore
-            batch_size=dl_batch_size,
+            flattened_ds,  # type: ignore
+            batch_size=self.batch_size,
             collate_fn=self._cached_dl_collate_fn,
             **{**self._default_dl_kwargs, **(dl_kwargs or {})}
         )
