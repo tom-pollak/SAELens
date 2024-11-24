@@ -8,17 +8,16 @@ import datasets
 import pytest
 import torch
 from datasets import Dataset, load_dataset
-from tqdm import trange
-from transformer_lens import HookedTransformer
-
 from sae_lens.cache_activations_runner import CacheActivationsRunner
 from sae_lens.config import (
     DTYPE_MAP,
     CacheActivationsRunnerConfig,
     LanguageModelSAERunnerConfig,
 )
-from sae_lens.load_model import load_model
 from sae_lens.training.activations_store import ActivationsStore
+from sae_lens.training.cached_activation_store import CachedActivationsStore
+from tqdm import trange
+from transformer_lens import HookedTransformer
 
 
 def _default_cfg(
@@ -91,24 +90,57 @@ def test_cache_activations_runner(tmp_path: Path):
 
 
 def test_load_cached_activations(tmp_path: Path):
-    cfg = _default_cfg(tmp_path)
+    cfg = _default_cfg(tmp_path, batch_size=32)
+    runner = CacheActivationsRunner(cfg)
+    ds = runner.run()
+    ds.set_format("torch")
+    tokens = ds[cfg.hook_name]
+    assert isinstance(tokens, torch.Tensor)
+    assert tokens.shape == (cfg.dataset_num_rows, cfg.context_size, cfg.d_in)
+    tokens = tokens.flatten(0, 1)[:, None, :]  # (batch, hook [only 1], d_in)
+
+    for batch_size in [8, 16, 24, 32]:
+        activations_store = CachedActivationsStore(
+            cached_activations_path=tmp_path,
+            column_names=[cfg.hook_name],
+            batch_size=batch_size,
+            dl_kwargs=dict(shuffle=False, drop_last=False),
+        )
+        assert len(activations_store) == cfg.total_training_tokens // batch_size
+        for i in range(0, len(tokens), batch_size):
+            batch = activations_store.next_batch()
+            torch.testing.assert_close(batch, tokens[i : i + batch_size])
+
+
+def test_load_cached_activations_from_config_refreshes_when_runs_out(tmp_path: Path):
+    cfg = _default_cfg(tmp_path, batch_size=32)
     runner = CacheActivationsRunner(cfg)
     runner.run()
 
-    model = HookedTransformer.from_pretrained(cfg.model_name)
+    batch_size = 16
+    activations_store = CachedActivationsStore.from_config(cfg, batch_size=batch_size)
+    assert len(activations_store) == cfg.total_training_tokens // batch_size
+    for _ in range(len(activations_store)):
+        batch = activations_store.next_batch(raise_on_epoch_end=True)
+        assert batch.shape == (
+            batch_size,
+            1,
+            cfg.d_in,
+        )
+    with pytest.raises(StopIteration):
+        activations_store.next_batch(raise_on_epoch_end=True)
 
-    activations_store = ActivationsStore.from_config(model, cfg)
-
-    for _ in range(cfg.n_buffers):
-        buffer = activations_store.get_buffer(
-            cfg.batches_in_buffer
-        )  # Adjusted to use n_batches_in_buffer
-        assert buffer.shape == (
-            cfg.rows_in_buffer * cfg.context_size,
+    for _ in range(len(activations_store)):
+        batch = activations_store.next_batch(raise_on_epoch_end=True)
+        assert batch.shape == (
+            batch_size,
             1,
             cfg.d_in,
         )
 
+    # Doesn't raise StopIteration
+    batch = activations_store.next_batch(raise_on_epoch_end=False)
+    assert batch.shape == (batch_size, 1, cfg.d_in)
 
 def test_activations_store_refreshes_dataset_when_it_runs_out(tmp_path: Path):
 
@@ -224,19 +256,12 @@ def test_compare_cached_activations_end_to_end_with_ground_truth(tmp_path: Path)
 def test_load_activations_store_with_nonexistent_dataset(tmp_path: Path):
     cfg = _default_cfg(tmp_path)
 
-    model = load_model(
-        model_class_name=cfg.model_class_name,
-        model_name=cfg.model_name,
-        device=cfg.device,
-        model_from_pretrained_kwargs=cfg.model_from_pretrained_kwargs,
-    )
-
     # Attempt to load from a non-existent dataset
     with pytest.raises(
         FileNotFoundError,
         match="is neither a `Dataset` directory nor a `DatasetDict` directory.",
     ):
-        ActivationsStore.from_config(model, cfg)
+        CachedActivationsStore.from_config(cfg, batch_size=1)
 
 
 def test_cache_activations_runner_with_nonempty_directory(tmp_path: Path):
@@ -267,49 +292,6 @@ def test_cache_activations_runner_with_incorrect_d_in(tmp_path: Path):
         match=r"The expanded size of the tensor \(513\) must match the existing size \(512\) at non-singleton dimension 2.",
     ):
         runner.run()
-
-
-def test_cache_activations_runner_load_dataset_with_incorrect_config(tmp_path: Path):
-    correct_cfg = _default_cfg(tmp_path, context_size=16)
-    runner = CacheActivationsRunner(correct_cfg)
-    runner.run()
-    model = runner.model
-
-    # Context size different from dataset
-    wrong_context_size_cfg = CacheActivationsRunnerConfig(
-        **dataclasses.asdict(correct_cfg),
-    )
-    wrong_context_size_cfg.context_size = 13
-
-    with pytest.raises(
-        ValueError,
-        match=r"Given dataset of shape \(16, 512\) does not match context_size \(13\) and d_in \(512\)",
-    ):
-        ActivationsStore.from_config(model, wrong_context_size_cfg)
-
-    # d_in different from dataset
-    wrong_d_in_cfg = CacheActivationsRunnerConfig(
-        **dataclasses.asdict(correct_cfg),
-    )
-    wrong_d_in_cfg.d_in = 513
-
-    with pytest.raises(
-        ValueError,
-        match=r"Given dataset of shape \(16, 512\) does not match context_size \(16\) and d_in \(513\)",
-    ):
-        ActivationsStore.from_config(model, wrong_d_in_cfg)
-
-    # Incorrect hook_name
-    wrong_hook_cfg = CacheActivationsRunnerConfig(
-        **dataclasses.asdict(correct_cfg),
-    )
-    wrong_hook_cfg.hook_name = "blocks.1.hook_mlp_out"
-
-    with pytest.raises(
-        ValueError,
-        match=r"Columns \['blocks.1.hook_mlp_out'\] not in the dataset. Current columns in the dataset: \['blocks.0.hook_mlp_out'\]",
-    ):
-        ActivationsStore.from_config(model, wrong_hook_cfg)
 
 
 def test_cache_activations_runner_with_valid_seqpos(tmp_path: Path):

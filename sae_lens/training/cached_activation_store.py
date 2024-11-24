@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
 
 import einops
 import numpy as np
@@ -17,12 +17,35 @@ class CachedActivationsStore:
     """
     Given a path to a cached activations dataset, create a dataloader that yields batches of shape (batch_size, hook, seq_len, d_model)
 
+    I think this has a problem at the moment, each row is a 2D array (context_size, d_in),
+    each batch is a 3D array (batch_size, context_size, d_in)
+
+    Even shuffling a batch to (batch_size * context_size, d_in),
+    this is not a perfectly shuffled since it will include the full context of each sequence.
+
     Args:
         cached_activations_path: Path to a cached activations dataset
         column_names: List of column names to include in the dataloader. These will be the hook names of the activations.
         batch_size: Number of sequences per batch
         dl_kwargs: Keyword arguments for the dataloader
     """
+    ds: Dataset
+    dl: torch.utils.data.DataLoader[Float[torch.Tensor, "batch hook d_model"]]
+    dl_it: Iterator[Float[torch.Tensor, "batch hook d_model"]]
+    column_names: list[str]
+    batch_size: int
+    context_size: int
+    estimated_norm_scaling_factor: float
+    d_in: int
+    dl_kwargs: dict[str, Any]
+    _default_dl_kwargs: dict[str, Any] = {
+        "num_workers": min(8, os.cpu_count() or 1),
+        "prefetch_factor": 4,
+        "persistent_workers": False,
+        "pin_memory": False,
+        "shuffle": True,
+        "drop_last": True,
+    }
 
     @classmethod
     def from_config(
@@ -59,11 +82,16 @@ class CachedActivationsStore:
         self.estimated_norm_scaling_factor = 1.0  # updated by SAETrainer
 
         self.ds = Dataset.load_from_disk(cached_activations_path)
-        self.ds.set_format(type="torch")
+        self.ds.set_format(type="torch", columns=self.column_names)
 
         feats = self.ds.features
         assert feats is not None
         self.context_size, self.d_in = feats[list(feats.keys())[0]].shape
+        for feat in feats.values():
+            if feat.shape != (self.context_size, self.d_in):
+                raise ValueError(
+                    f"All features must have the same (context_size, d_in). Got different shapes: {(self.context_size, self.d_in)} vs {feat.shape}."
+                )
 
         self.dl = self._mk_cached_dl(self.dl_kwargs)
         self.reset_input_dataset()
@@ -79,12 +107,9 @@ class CachedActivationsStore:
 
         Transforms into a single batch with shape: (hook, seq_len, d_model)
         """
-        acts = torch.stack(
-            [
-                torch.stack([d[col_name] for col_name in self.column_names])
-                for d in batch
-            ]
-        )
+        acts = torch.stack([
+            torch.stack(list(d.values())) for d in batch
+        ])
         return einops.rearrange(
             acts,
             "batch hook seq_len d_model -> (batch seq_len) hook d_model",
@@ -93,32 +118,24 @@ class CachedActivationsStore:
     def _mk_cached_dl(
         self,
         dl_kwargs: dict[str, Any],
-    ) -> torch.utils.data.DataLoader[Float[torch.Tensor, "batch hook d_model"]]:
+    ) -> torch.utils.data.DataLoader[torch.Tensor]:
         assert (
+            self.batch_size >= self.context_size and
             self.batch_size % self.context_size == 0
-        ), "batch_size must be divisible by seq_len"
+        ), "batch_size must be divisible by context_size"
         dl_batch_size = self.batch_size // self.context_size
-
-        default_dl_kwargs: dict[str, Any] = {
-            "num_workers": min(8, os.cpu_count() or 1),
-            "prefetch_factor": 2,
-            "persistent_workers": False,
-            "pin_memory": True,
-            "shuffle": True,
-            "drop_last": True,
-        }
-        default_dl_kwargs.update(dl_kwargs)
-
         return torch.utils.data.DataLoader(
             self.ds,  # type: ignore
             batch_size=dl_batch_size,
             collate_fn=self._cached_dl_collate_fn,
-            **default_dl_kwargs,
+            **{**self._default_dl_kwargs, **(dl_kwargs or {})}
         )
 
     # █████████████████████████████████  Common fns  █████████████████████████████████
 
     def reset_input_dataset(self):
+        if hasattr(self, "dl_it"):
+            del self.dl_it
         self.dl_it = iter(self.dl)
 
     def next_batch(
@@ -134,7 +151,7 @@ class CachedActivationsStore:
                 return next(self.dl_it)
 
     def __len__(self):
-        return len(self.ds)
+        return len(self.dl)
 
     # ████████████████████████████  ActivationStore fns  █████████████████████████████
 
