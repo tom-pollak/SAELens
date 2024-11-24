@@ -106,7 +106,7 @@ def test_load_cached_activations(tmp_path: Path):
             batch_size=batch_size,
             dl_kwargs=dict(shuffle=False, drop_last=False),
         )
-        assert len(activations_store) == cfg.total_training_tokens // batch_size
+        assert len(activations_store) == math.ceil(cfg.total_training_tokens / batch_size)
         for i in range(0, len(tokens), batch_size):
             batch = activations_store.next_batch()
             torch.testing.assert_close(batch, tokens[i : i + batch_size])
