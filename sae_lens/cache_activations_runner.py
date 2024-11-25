@@ -3,10 +3,23 @@ import json
 import shutil
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 import einops
 import torch
-from datasets import Array2D, Dataset, Features, set_caching_enabled
+from datasets import (
+    Dataset,
+    DatasetInfo,
+    Features,
+    Sequence,
+    Value,
+    disable_caching,
+    enable_caching,
+)
+from datasets.arrow_dataset import (
+    InMemoryTable,
+)
+from datasets.arrow_writer import OptimizedTypedSequence
 from datasets.fingerprint import generate_fingerprint
 from huggingface_hub import HfApi
 from jaxtyping import Float
@@ -15,6 +28,26 @@ from sae_lens.load_model import load_model
 from sae_lens.training.activations_store import ActivationsStore
 from tqdm import tqdm
 
+
+def fast_from_dict(mapping: dict[str, Any], features: Features) -> Dataset:
+    """Like datasets.Dataset.from_dict but skips fingerprint generation"""
+    arrow_typed_mapping = {}
+    for col, data in mapping.items():
+        data = OptimizedTypedSequence(
+            features.encode_column(data, col),
+            type=features[col],
+            col=col,
+        )
+        print(type(data))
+        arrow_typed_mapping[col] = data
+
+    pa_table = InMemoryTable.from_pydict(mapping=arrow_typed_mapping)
+
+    info = DatasetInfo(features=Features({
+        col: data.get_inferred_type()
+        for col, data in arrow_typed_mapping.items()
+    }))
+    return Dataset(pa_table, info=info, fingerprint="dummy")
 
 class CacheActivationsRunner:
     def __init__(self, cfg: CacheActivationsRunnerConfig):
@@ -35,9 +68,7 @@ class CacheActivationsRunner:
         )
         self.features = Features(
             {
-                hook_name: Array2D(
-                    shape=(self.context_size, self.cfg.d_in), dtype=self.cfg.dtype
-                )
+                hook_name: Sequence(feature=Value(dtype=self.cfg.dtype), length=self.cfg.d_in)
                 for hook_name in [self.cfg.hook_name]
             }
         )
@@ -189,6 +220,7 @@ class CacheActivationsRunner:
 
     @torch.no_grad()
     def run(self) -> Dataset:
+        print(str(self))
         activation_save_path = self.cfg.activation_save_path
         assert activation_save_path is not None
 
@@ -206,7 +238,7 @@ class CacheActivationsRunner:
         ### Create temporary sharded datasets
 
         print(f"Started caching activations for {self.cfg.hf_dataset_path}")
-        set_caching_enabled(False)
+        disable_caching()
         for i in tqdm(range(self.cfg.n_buffers), desc="Caching activations"):
             try:
                 buffer = self.activations_store.get_buffer(
@@ -223,7 +255,7 @@ class CacheActivationsRunner:
                     f"Warning: Ran out of samples while filling the buffer at batch {i} before reaching {self.cfg.n_buffers} batches."
                 )
                 break
-        set_caching_enabled(True)
+        enable_caching()
 
         ### Concatenate shards and push to Huggingface Hub
 
@@ -274,20 +306,14 @@ class CacheActivationsRunner:
 
     def _create_shard(
         self,
-        buffer: Float[torch.Tensor, "(bs context_size) num_layers d_in"],
+        buffer: Float[torch.Tensor, "batch layer d_in"],
     ) -> Dataset:
-        hook_names = [self.cfg.hook_name]
+        assert buffer.device.type == "cpu"
 
-        buffer = einops.rearrange(
-            buffer,
-            "(bs context_size) num_layers d_in -> num_layers bs context_size d_in",
-            bs=self.cfg.rows_in_buffer,
-            context_size=self.context_size,
-            d_in=self.cfg.d_in,
-            num_layers=len(hook_names),
-        )
-        shard = Dataset.from_dict(
-            {hook_name: act for hook_name, act in zip(hook_names, buffer)},
+        hook_names = [self.cfg.hook_name]
+        buffer = einops.rearrange(buffer, "batch layer d_in -> layer batch d_in")
+        shard = fast_from_dict(
+            {hook_name: act for hook_name, act in zip(hook_names, buffer.unbind(dim=0))},
             features=self.features,
         )
         return shard
