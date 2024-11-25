@@ -1,4 +1,3 @@
-import math
 import os
 import shutil
 import time
@@ -9,7 +8,7 @@ from safetensors.torch import save_file
 from tqdm import trange
 
 from sae_lens.cache_activations_runner import CacheActivationsRunner
-from sae_lens.config import DTYPE_MAP, CacheActivationsRunnerConfig
+from sae_lens.config import CacheActivationsRunnerConfig
 
 os.environ["WANDB_MODE"] = "offline"  # turn this off if you want to see the output
 
@@ -36,7 +35,10 @@ def test_cache_activations_runner():
     if os.path.exists(activations_save_path):
         shutil.rmtree(activations_save_path)
 
-    torch.mps.empty_cache()
+    if device == "cuda":
+        torch.cuda.empty_cache()
+    elif device == "mps":
+        torch.mps.empty_cache()
 
     cfg = CacheActivationsRunnerConfig(
         activation_save_path=activations_save_path,
@@ -65,14 +67,9 @@ def test_cache_activations_runner():
 
 
 def test_hf_dataset_save_vs_safetensors(tmp_path: Path):
-    niters = 10
-    context_size = 32
     dataset_num_rows = 10_000
-    model_batch_size = 8
-    num_buffers = 4 * niters
-
-    ###
-
+    context_size = 512
+    model_batch_size = 32
     d_in = 512
     dtype = "float32"
     device = (
@@ -81,12 +78,13 @@ def test_hf_dataset_save_vs_safetensors(tmp_path: Path):
         else "mps" if torch.backends.mps.is_available() else "cpu"
     )
 
-    bytes_per_token = d_in * DTYPE_MAP[dtype].itemsize
-    tokens_per_buffer = math.ceil(dataset_num_rows * context_size / num_buffers)
-    buffer_size_gb = min((tokens_per_buffer * bytes_per_token) / 1_000_000_000, 2.0)
+    safetensors_path = tmp_path / "saftensors"
+    hf_path = tmp_path / "hf"
+    safetensors_path.mkdir()
+    hf_path.mkdir()
 
     cfg = CacheActivationsRunnerConfig(
-        activation_save_path=str(tmp_path),
+        activation_save_path=str(hf_path),
         hf_dataset_path="NeelNanda/c4-tokenized-2b",
         model_name="gelu-1l",
         hook_name="blocks.0.hook_mlp_out",
@@ -95,8 +93,8 @@ def test_hf_dataset_save_vs_safetensors(tmp_path: Path):
         context_size=context_size,
         dataset_num_rows=dataset_num_rows,
         model_batch_size=model_batch_size,
-        buffer_size_gb=buffer_size_gb,
         prepend_bos=False,
+        shuffle=False,
         device=device,
         seed=42,
         dtype=dtype,
@@ -104,30 +102,20 @@ def test_hf_dataset_save_vs_safetensors(tmp_path: Path):
     runner = CacheActivationsRunner(cfg)
     store = runner.activations_store
 
-    ###
-
-    safetensors_path = tmp_path / "saftensors"
-    hf_path = tmp_path / "hf"
-    safetensors_path.mkdir()
-    hf_path.mkdir()
-
     print("Warmup")
 
-    for i in trange(niters // 2, leave=False):
+    for i in trange(10 // 2, leave=False):
         buffer = store.get_buffer(cfg.batches_in_buffer)
 
     start_time = time.perf_counter()
-    for i in trange(niters, leave=False):
+    for i in trange(cfg.n_buffers, leave=False):
         buffer = store.get_buffer(cfg.batches_in_buffer)
     end_time = time.perf_counter()
 
     print(f"No saving took: {end_time - start_time:.4f}")
 
     start_time = time.perf_counter()
-    for i in trange(niters, leave=False):
-        buffer = store.get_buffer(cfg.batches_in_buffer)
-        shard = runner._create_shard(buffer)
-        shard.save_to_disk(hf_path / str(i), num_shards=1)
+    runner.run()
     end_time = time.perf_counter()
     elapsed_time = end_time - start_time
 
@@ -136,7 +124,7 @@ def test_hf_dataset_save_vs_safetensors(tmp_path: Path):
     print(f"HF Dataset size: {hf_size / (1024 * 1024):.2f} MB")
 
     start_time = time.perf_counter()
-    for i in trange(niters, leave=False):
+    for i in trange(cfg.n_buffers, leave=False):
         buffer = store.get_buffer(cfg.batches_in_buffer)
         save_file({"activations": buffer}, safetensors_path / f"{i}.safetensors")
     end_time = time.perf_counter()
