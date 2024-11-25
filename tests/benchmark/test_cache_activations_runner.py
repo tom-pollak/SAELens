@@ -41,17 +41,17 @@ def test_cache_activations_runner():
         torch.mps.empty_cache()
 
     cfg = CacheActivationsRunnerConfig(
-        activation_save_path=activations_save_path,
-        dataset_num_rows=4_000,  # substantial amount of rows
+        new_cached_activations_path=activations_save_path,
+        training_tokens=16_000,
         # Pick a tiny model to make this easier.
         model_name="gelu-1l",
         model_batch_size=16,
         ## MLP Layer 0 ##
         hook_name="blocks.0.hook_mlp_out",
-        final_hook_layer=0,
+        hook_layer=0,
         d_in=512,
         ## Dataset ##
-        hf_dataset_path="NeelNanda/c4-tokenized-2b",
+        dataset_path="NeelNanda/c4-tokenized-2b",
         context_size=1024,
         ## Misc ##
         device=device,
@@ -84,14 +84,14 @@ def test_hf_dataset_save_vs_safetensors(tmp_path: Path):
     hf_path.mkdir()
 
     cfg = CacheActivationsRunnerConfig(
-        activation_save_path=str(hf_path),
-        hf_dataset_path="NeelNanda/c4-tokenized-2b",
+        new_cached_activations_path=str(tmp_path),
+        dataset_path="NeelNanda/c4-tokenized-2b",
         model_name="gelu-1l",
         hook_name="blocks.0.hook_mlp_out",
-        final_hook_layer=0,
+        hook_layer=0,
         d_in=d_in,
         context_size=context_size,
-        dataset_num_rows=dataset_num_rows,
+        training_tokens=total_training_tokens,
         model_batch_size=model_batch_size,
         prepend_bos=False,
         shuffle=False,
@@ -104,18 +104,21 @@ def test_hf_dataset_save_vs_safetensors(tmp_path: Path):
 
     print("Warmup")
 
-    for i in trange(10 // 2, leave=False):
-        buffer = store.get_buffer(cfg.batches_in_buffer)
+    for i in trange(niters // 2, leave=False):
+        buffer = store.get_buffer(cfg.n_batches_in_buffer)
 
     start_time = time.perf_counter()
-    for i in trange(cfg.n_buffers, leave=False):
-        buffer = store.get_buffer(cfg.batches_in_buffer)
+    for i in trange(niters, leave=False):
+        buffer = store.get_buffer(cfg.n_batches_in_buffer)
     end_time = time.perf_counter()
 
     print(f"No saving took: {end_time - start_time:.4f}")
 
     start_time = time.perf_counter()
-    runner.run()
+    for i in trange(niters, leave=False):
+        buffer = store.get_buffer(cfg.n_batches_in_buffer)
+        shard = runner._create_shard(buffer)
+        shard.save_to_disk(hf_path / str(i), num_shards=1)
     end_time = time.perf_counter()
     elapsed_time = end_time - start_time
 
@@ -124,8 +127,8 @@ def test_hf_dataset_save_vs_safetensors(tmp_path: Path):
     print(f"HF Dataset size: {hf_size / (1024 * 1024):.2f} MB")
 
     start_time = time.perf_counter()
-    for i in trange(cfg.n_buffers, leave=False):
-        buffer = store.get_buffer(cfg.batches_in_buffer)
+    for i in trange(niters, leave=False):
+        buffer = store.get_buffer(cfg.n_batches_in_buffer)
         save_file({"activations": buffer}, safetensors_path / f"{i}.safetensors")
     end_time = time.perf_counter()
 
