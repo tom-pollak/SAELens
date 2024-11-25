@@ -6,7 +6,7 @@ from pathlib import Path
 
 import einops
 import torch
-from datasets import Array2D, Dataset, Features
+from datasets import Array2D, Dataset, Features, set_caching_enabled
 from datasets.fingerprint import generate_fingerprint
 from huggingface_hub import HfApi
 from jaxtyping import Float
@@ -206,7 +206,7 @@ class CacheActivationsRunner:
         ### Create temporary sharded datasets
 
         print(f"Started caching activations for {self.cfg.hf_dataset_path}")
-
+        set_caching_enabled(False)
         for i in tqdm(range(self.cfg.n_buffers), desc="Caching activations"):
             try:
                 buffer = self.activations_store.get_buffer(
@@ -223,6 +223,7 @@ class CacheActivationsRunner:
                     f"Warning: Ran out of samples while filling the buffer at batch {i} before reaching {self.cfg.n_buffers} batches."
                 )
                 break
+        set_caching_enabled(True)
 
         ### Concatenate shards and push to Huggingface Hub
 

@@ -101,7 +101,7 @@ def test_load_cached_activations(tmp_path: Path):
 
     for batch_size in [8, 16, 24, 32]:
         activations_store = CachedActivationsStore(
-            cached_activations_path=tmp_path,
+            activation_save_path=tmp_path,
             column_names=[cfg.hook_name],
             batch_size=batch_size,
             dl_kwargs=dict(shuffle=False, drop_last=False),
@@ -259,7 +259,7 @@ def test_load_activations_store_with_nonexistent_dataset(tmp_path: Path):
     # Attempt to load from a non-existent dataset
     with pytest.raises(
         FileNotFoundError,
-        match="is neither a `Dataset` directory nor a `DatasetDict` directory.",
+        match=r"Expected to load a `Dataset` object but provided path is not a `Dataset`.",
     ):
         CachedActivationsStore.from_config(cfg, batch_size=1)
 

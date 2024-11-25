@@ -5,11 +5,11 @@ import time
 from pathlib import Path
 
 import torch
-from safetensors.torch import save_file
-from tqdm import trange
-
 from sae_lens.cache_activations_runner import CacheActivationsRunner
 from sae_lens.config import DTYPE_MAP, CacheActivationsRunnerConfig
+from sae_lens.training.cached_activation_store import CachedActivationsStore
+from safetensors.torch import save_file
+from tqdm import trange
 
 os.environ["WANDB_MODE"] = "offline"  # turn this off if you want to see the output
 
@@ -62,6 +62,21 @@ def test_cache_activations_runner():
     end_time = time.perf_counter()
     elapsed_time = end_time - start_time
     print(f"Caching activations took: {elapsed_time:.4f}")
+
+    start_time = time.perf_counter()
+    assert cfg.activation_save_path is not None
+    store = CachedActivationsStore(Path(cfg.activation_save_path), column_names=[cfg.hook_name], batch_size=cfg.model_batch_size * 4, proper_shuffle=True, dl_kwargs=None)
+    end_time = time.perf_counter()
+    elapsed_time = end_time - start_time
+    print(f"Loading activations took: {elapsed_time:.4f}")
+
+    start_time = time.perf_counter()
+    for _ in range(len(store)):
+        store.next_batch()
+    end_time = time.perf_counter()
+    elapsed_time = end_time - start_time
+    print(f"Iterating through activations took: {elapsed_time:.4f}")
+
 
 
 def test_hf_dataset_save_vs_safetensors(tmp_path: Path):
