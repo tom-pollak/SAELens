@@ -13,18 +13,15 @@ class BaseStore(ABC):
     estimated_norm_scaling_factor: float = 1.0  # updated by SAETrainer
 
     @abstractmethod
-    def reset_input_dataset(self):
-        ...
+    def reset_input_dataset(self): ...
 
     @abstractmethod
     def next_batch(
         self, raise_on_epoch_end: bool = False
-    ) -> Float[t.Tensor, "batch hook d_model"]:
-        ...
+    ) -> Float[t.Tensor, "batch hook d_model"]: ...
 
     @abstractmethod
-    def __len__(self) -> int:
-        ...
+    def __len__(self) -> int: ...
 
     @t.no_grad()
     def estimate_norm_scaling_factor(self, n_batches_for_norm_estimate: int = int(1e3)):

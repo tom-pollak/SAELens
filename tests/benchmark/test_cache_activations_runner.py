@@ -7,8 +7,8 @@ import torch
 from safetensors.torch import save_file
 from tqdm import trange
 
-from sae_lens.store.cache_activations_runner import CacheActivationsRunner
 from sae_lens.config import CacheActivationsRunnerConfig
+from sae_lens.store.cache_activations_runner import CacheActivationsRunner
 
 os.environ["WANDB_MODE"] = "offline"  # turn this off if you want to see the output
 
@@ -67,7 +67,7 @@ def test_cache_activations_runner():
 
 
 def test_hf_dataset_save_vs_safetensors(tmp_path: Path):
-    dataset_num_rows = 10_000
+    niters = 10
     context_size = 512
     model_batch_size = 32
     d_in = 512
@@ -85,13 +85,13 @@ def test_hf_dataset_save_vs_safetensors(tmp_path: Path):
 
     cfg = CacheActivationsRunnerConfig(
         new_cached_activations_path=str(tmp_path),
+        training_tokens=16_000,
         dataset_path="NeelNanda/c4-tokenized-2b",
         model_name="gelu-1l",
         hook_name="blocks.0.hook_mlp_out",
         hook_layer=0,
         d_in=d_in,
         context_size=context_size,
-        training_tokens=total_training_tokens,
         model_batch_size=model_batch_size,
         prepend_bos=False,
         shuffle=False,
@@ -116,9 +116,7 @@ def test_hf_dataset_save_vs_safetensors(tmp_path: Path):
 
     start_time = time.perf_counter()
     for i in trange(niters, leave=False):
-        buffer = store.get_buffer(cfg.n_batches_in_buffer)
-        shard = runner._create_shard(buffer)
-        shard.save_to_disk(hf_path / str(i), num_shards=1)
+        runner.run()
     end_time = time.perf_counter()
     elapsed_time = end_time - start_time
 

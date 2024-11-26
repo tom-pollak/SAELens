@@ -2,7 +2,6 @@ __version__ = "4.4.2"
 
 
 from .analysis.hooked_sae_transformer import HookedSAETransformer
-from .store.cache_activations_runner import CacheActivationsRunner
 from .config import (
     CacheActivationsRunnerConfig,
     LanguageModelSAERunnerConfig,
@@ -12,6 +11,7 @@ from .evals import run_evals
 from .pretokenize_runner import PretokenizeRunner, pretokenize_runner
 from .sae import SAE, SAEConfig
 from .sae_training_runner import SAETrainingRunner
+from .store.cache_activations_runner import CacheActivationsRunner
 from .training.activations_store import ActivationsStore
 from .training.training_sae import TrainingSAE, TrainingSAEConfig
 from .training.upload_saes_to_huggingface import upload_saes_to_huggingface

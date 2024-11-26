@@ -11,13 +11,13 @@ from datasets import Dataset, Sequence, load_dataset
 from tqdm import trange
 from transformer_lens import HookedTransformer
 
-from sae_lens.store.cache_activations_runner import CacheActivationsRunner
 from sae_lens.config import (
     DTYPE_MAP,
     CacheActivationsRunnerConfig,
     LanguageModelSAERunnerConfig,
 )
 from sae_lens.load_model import load_model
+from sae_lens.store.cache_activations_runner import CacheActivationsRunner
 from sae_lens.training.activations_store import ActivationsStore
 
 
@@ -46,6 +46,7 @@ def _default_cfg(
         sliced_context_size = context_size
     tokens_per_buffer = math.ceil(dataset_num_rows * sliced_context_size / n_buffers)
     buffer_size_gb = (tokens_per_buffer * bytes_per_token) / 1_000_000_000
+    total_training_tokens = dataset_num_rows * sliced_context_size
 
     cfg = CacheActivationsRunnerConfig(
         new_cached_activations_path=str(tmp_path),
@@ -321,4 +322,4 @@ def test_cache_activations_runner_with_valid_seqpos(tmp_path: Path):
 
     assert os.path.exists(tmp_path)
 
-    assert len(dataset_acts) == cfg.total_training_tokens
+    assert len(dataset_acts) == cfg.training_tokens

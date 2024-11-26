@@ -3,8 +3,8 @@ import time
 
 import torch
 
-from sae_lens.store.cache_activations_runner import CacheActivationsRunner
 from sae_lens.config import CacheActivationsRunnerConfig
+from sae_lens.store.cache_activations_runner import CacheActivationsRunner
 
 if torch.cuda.is_available():
     device = "cuda"
@@ -21,7 +21,7 @@ model_name = "gelu-1l"
 model_batch_size = 16
 
 dataset_path = "NeelNanda/c4-tokenized-2b"
-dataset_num_rows = 10_000
+training_tokens = 100_000
 
 if device == "cuda":
     torch.cuda.empty_cache()
@@ -37,7 +37,7 @@ cfg = CacheActivationsRunnerConfig(
     hook_layer=0,
     d_in=512,
     prepend_bos=True,
-    training_tokens=total_training_tokens,
+    training_tokens=training_tokens,
     model_batch_size=model_batch_size,
     # Misc
     device=device,

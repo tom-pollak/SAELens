@@ -1,6 +1,7 @@
 import io
 import json
 from dataclasses import asdict
+from pathlib import Path
 from typing import Generator
 
 import datasets
@@ -16,6 +17,39 @@ from transformer_lens.HookedTransformer import HookedRootModule
 from sae_lens.config import DTYPE_MAP, CacheActivationsRunnerConfig
 from sae_lens.load_model import load_model
 from sae_lens.training.activations_store import ActivationsStore
+
+
+def _mk_activations_store(
+    model: HookedRootModule,
+    cfg: CacheActivationsRunnerConfig,
+) -> ActivationsStore:
+    """
+    Internal method used in CacheActivationsRunner. Used to create a cached dataset
+    from a ActivationsStore.
+    """
+    return ActivationsStore(
+        model=model,
+        dataset=cfg.dataset_path,
+        streaming=cfg.streaming,
+        hook_name=cfg.hook_name,
+        hook_layer=cfg.hook_layer,
+        hook_head_index=None,
+        context_size=cfg.context_size,
+        d_in=cfg.d_in,
+        n_batches_in_buffer=cfg.n_batches_in_buffer,
+        total_training_tokens=cfg.training_tokens,
+        store_batch_size_prompts=cfg.model_batch_size,
+        train_batch_size_tokens=-1,
+        prepend_bos=cfg.prepend_bos,
+        normalize_activations="none",
+        device=torch.device("cpu"),  # since we're saving to disk
+        dtype=cfg.dtype,
+        cached_activations_path=None,
+        model_kwargs=cfg.model_kwargs,
+        autocast_lm=cfg.autocast_lm,
+        dataset_trust_remote_code=cfg.dataset_trust_remote_code,
+        seqpos_slice=cfg.seqpos_slice,
+    )
 
 
 class CacheActivationDataset(datasets.ArrowBasedBuilder):
@@ -57,14 +91,16 @@ class CacheActivationDataset(datasets.ArrowBasedBuilder):
                 for hook_name in [cfg.hook_name]
             }
         )
-        cfg.activation_save_path.mkdir(parents=True, exist_ok=True)
-        assert cfg.activation_save_path.is_dir()
-        if any(cfg.activation_save_path.iterdir()):
+        assert cfg.new_cached_activations_path is not None
+        activation_save_path = Path(cfg.new_cached_activations_path)
+        activation_save_path.mkdir(parents=True, exist_ok=True)
+        assert activation_save_path.is_dir()
+        if any(activation_save_path.iterdir()):
             raise ValueError(
-                f"Activation save path {cfg.activation_save_path} is not empty. Please delete it or specify a different path"
+                f"Activation save path {activation_save_path} is not empty. Please delete it or specify a different path"
             )
-        cache_dir = cfg.activation_save_path.parent
-        dataset_name = cfg.activation_save_path.name
+        cache_dir = activation_save_path.parent
+        dataset_name = activation_save_path.name
         super().__init__(
             cache_dir=str(cache_dir),
             dataset_name=dataset_name,
@@ -81,7 +117,7 @@ class CacheActivationDataset(datasets.ArrowBasedBuilder):
     def _generate_tables(self) -> Generator[tuple[int, pa.Table], None, None]:  # type: ignore
         for i in range(self.cfg.n_buffers):
             buffer = self.activation_store.get_buffer(
-                self.cfg.batches_in_buffer, shuffle=False
+                self.cfg.n_batches_in_buffer, shuffle=False
             )
             assert buffer.device.type == "cpu"
             buffer = einops.rearrange(
@@ -121,10 +157,7 @@ class CacheActivationsRunner:
         )
         if self.cfg.compile_llm:
             self.model = torch.compile(self.model, mode=self.cfg.llm_compilation_mode)  # type: ignore
-        self.activations_store = ActivationsStore._from_save_activations(
-            self.model,
-            self.cfg,
-        )
+        self.activations_store = _mk_activations_store(self.model, self.cfg)
 
     def summary(self):
         """
@@ -139,14 +172,14 @@ class CacheActivationsRunner:
             if isinstance(self.cfg.dtype, torch.dtype)
             else DTYPE_MAP[self.cfg.dtype].itemsize
         )
-        total_training_tokens = self.cfg.dataset_num_rows * self.cfg.sliced_context_size
+        total_training_tokens = self.cfg.training_tokens
         total_disk_space_gb = total_training_tokens * bytes_per_token / 10**9
 
         print(
             f"Activation Cache Runner:\n"
             f"Total training tokens: {total_training_tokens}\n"
             f"Number of buffers: {self.cfg.n_buffers}\n"
-            f"Tokens per buffer: {self.cfg.tokens_in_buffer}\n"
+            f"Tokens per buffer: {self.cfg.n_tokens_in_buffer}\n"
             f"Disk space required: {total_disk_space_gb:.2f} GB\n"
             f"Configuration:\n"
             f"{self.cfg}"

@@ -9,7 +9,7 @@ from datasets import Dataset
 from jaxtyping import Float
 
 from sae_lens.config import CacheActivationsRunnerConfig
-from crosscoder.store.base_store import BaseStore
+from sae_lens.store.base_store import BaseStore
 
 
 class CachedActivationsStore(BaseStore):
