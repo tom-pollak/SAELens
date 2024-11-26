@@ -8,9 +8,6 @@ import datasets
 import pytest
 import torch
 from datasets import Dataset, Sequence, load_dataset
-from tqdm import trange
-from transformer_lens import HookedTransformer
-
 from sae_lens.config import (
     DTYPE_MAP,
     CacheActivationsRunnerConfig,
@@ -19,6 +16,8 @@ from sae_lens.config import (
 from sae_lens.load_model import load_model
 from sae_lens.store.cache_activations_runner import CacheActivationsRunner
 from sae_lens.training.activations_store import ActivationsStore
+from tqdm import trange
+from transformer_lens import HookedTransformer
 
 
 def _default_cfg(
@@ -84,8 +83,8 @@ def test_cache_activations_runner(tmp_path: Path):
     runner = CacheActivationsRunner(cfg)
     dataset = runner.run()
 
-    assert len(dataset) == cfg.n_buffers * (cfg.n_tokens_in_buffer // cfg.context_size)
-    assert cfg.n_seq_in_dataset == len(dataset)
+    assert len(dataset) == cfg.n_buffers * cfg.n_tokens_in_buffer
+    assert cfg.n_seq_in_dataset == len(dataset) // cfg.sliced_context_size
     assert dataset.num_columns == 1 and dataset.column_names == [cfg.hook_name]
 
     features = dataset.features
