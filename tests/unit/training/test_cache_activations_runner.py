@@ -11,7 +11,7 @@ from datasets import Dataset, Sequence, load_dataset
 from tqdm import trange
 from transformer_lens import HookedTransformer
 
-from sae_lens.cache_activations_runner import CacheActivationsRunner
+from sae_lens.store.cache_activations_runner import CacheActivationsRunner
 from sae_lens.config import (
     DTYPE_MAP,
     CacheActivationsRunnerConfig,

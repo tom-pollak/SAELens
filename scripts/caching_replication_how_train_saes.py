@@ -3,7 +3,7 @@ import time
 
 import torch
 
-from sae_lens.cache_activations_runner import CacheActivationsRunner
+from sae_lens.store.cache_activations_runner import CacheActivationsRunner
 from sae_lens.config import CacheActivationsRunnerConfig
 
 if torch.cuda.is_available():

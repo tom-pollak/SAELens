@@ -2,7 +2,7 @@ __version__ = "4.4.2"
 
 
 from .analysis.hooked_sae_transformer import HookedSAETransformer
-from .cache_activations_runner import CacheActivationsRunner
+from .store.cache_activations_runner import CacheActivationsRunner
 from .config import (
     CacheActivationsRunnerConfig,
     LanguageModelSAERunnerConfig,
