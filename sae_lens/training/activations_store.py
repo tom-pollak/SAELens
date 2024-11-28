@@ -27,11 +27,12 @@ from sae_lens.config import (
     LanguageModelSAERunnerConfig,
 )
 from sae_lens.sae import SAE
+from sae_lens.store.base_store import BaseStore
 from sae_lens.tokenization_and_batching import concat_and_batch_sequences
 
 
 # TODO: Make an activation store config class to be consistent with the rest of the code.
-class ActivationsStore:
+class ActivationsStore(BaseStore):
     """
     Class for streaming tokens and generating and storing activations
     while training SAEs.
@@ -682,7 +683,7 @@ class ActivationsStore:
 
         return dataloader
 
-    def next_batch(self):
+    def next_batch(self, raise_on_epoch_end: bool = False):
         """
         Get the next batch from the current DataLoader.
         If the DataLoader is exhausted, refill the buffer and create a new DataLoader.
@@ -705,6 +706,9 @@ class ActivationsStore:
 
     def save(self, file_path: str):
         save_file(self.state_dict(), file_path)
+
+    def __len__(self):
+        return (len(self.dataloader) * self.context_size) // self.store_batch_size_prompts  # type: ignore
 
 
 def validate_pretokenized_dataset_tokenizer(

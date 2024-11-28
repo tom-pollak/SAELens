@@ -8,6 +8,9 @@ import datasets
 import pytest
 import torch
 from datasets import Dataset, Sequence, load_dataset
+from tqdm import trange
+from transformer_lens import HookedTransformer
+
 from sae_lens.config import (
     DTYPE_MAP,
     CacheActivationsRunnerConfig,
@@ -16,8 +19,6 @@ from sae_lens.config import (
 from sae_lens.load_model import load_model
 from sae_lens.store.cache_activations_runner import CacheActivationsRunner
 from sae_lens.training.activations_store import ActivationsStore
-from tqdm import trange
-from transformer_lens import HookedTransformer
 
 
 def _default_cfg(

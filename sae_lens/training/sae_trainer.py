@@ -11,7 +11,7 @@ from transformer_lens.hook_points import HookedRootModule
 from sae_lens import __version__
 from sae_lens.config import LanguageModelSAERunnerConfig
 from sae_lens.evals import EvalConfig, run_evals
-from sae_lens.training.activations_store import ActivationsStore
+from sae_lens.store.base_store import BaseStore
 from sae_lens.training.optim import L1Scheduler, get_lr_scheduler
 from sae_lens.training.training_sae import TrainingSAE, TrainStepOutput
 
@@ -52,7 +52,7 @@ class SAETrainer:
         self,
         model: HookedRootModule,
         sae: TrainingSAE,
-        activation_store: ActivationsStore,
+        activation_store: BaseStore,
         save_checkpoint_fn,  # type: ignore
         cfg: LanguageModelSAERunnerConfig,
     ) -> None:
@@ -350,7 +350,6 @@ class SAETrainer:
 
             # Remove metrics that are not useful for wandb logging
             eval_metrics.pop("metrics/total_tokens_evaluated", None)
-
             W_dec_norm_dist = self.sae.W_dec.detach().float().norm(dim=1).cpu().numpy()
             eval_metrics["weights/W_dec_norms"] = wandb.Histogram(W_dec_norm_dist)  # type: ignore
 

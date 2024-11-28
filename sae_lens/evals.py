@@ -18,6 +18,8 @@ from transformer_lens import HookedTransformer
 from transformer_lens.hook_points import HookedRootModule
 
 from sae_lens.sae import SAE
+from sae_lens.store.base_store import BaseStore
+from sae_lens.store.cached_activation_store import CachedActivationsStore
 from sae_lens.toolkit.pretrained_saes_directory import get_pretrained_saes_directory
 from sae_lens.training.activations_store import ActivationsStore
 
@@ -100,7 +102,7 @@ def get_eval_everything_config(
 @torch.no_grad()
 def run_evals(
     sae: SAE,
-    activation_store: ActivationsStore,
+    activation_store: BaseStore,
     model: HookedRootModule,
     eval_config: EvalConfig = EvalConfig(),
     model_kwargs: Mapping[str, Any] = {},
@@ -109,9 +111,14 @@ def run_evals(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
 
     hook_name = sae.cfg.hook_name
-    actual_batch_size = (
-        eval_config.batch_size_prompts or activation_store.store_batch_size_prompts
-    )
+    if isinstance(activation_store, ActivationsStore):
+        actual_batch_size = (
+            eval_config.batch_size_prompts or activation_store.store_batch_size_prompts
+        )
+    elif isinstance(activation_store, CachedActivationsStore):
+        actual_batch_size = activation_store.batch_size
+    else:
+        raise ValueError(f"Unsupported activation store type: {type(activation_store)}")
 
     # TODO: Come up with a cleaner long term strategy here for SAEs that do reshaping.
     # turn off hook_z reshaping mode if it's on, and restore it after evals
@@ -131,6 +138,7 @@ def run_evals(
     }
 
     if eval_config.compute_kl or eval_config.compute_ce_loss:
+        assert isinstance(activation_store, ActivationsStore)
         assert eval_config.n_eval_reconstruction_batches > 0
         reconstruction_metrics = get_downstream_reconstruction_metrics(
             sae,
@@ -177,6 +185,7 @@ def run_evals(
         or eval_config.compute_variance_metrics
     ):
         assert eval_config.n_eval_sparsity_variance_batches > 0
+        assert isinstance(activation_store, ActivationsStore)
         sparsity_variance_metrics, feature_metrics = get_sparsity_and_variance_metrics(
             sae,
             model,

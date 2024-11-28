@@ -14,6 +14,7 @@ from transformer_lens.hook_points import HookedRootModule
 from sae_lens.config import HfDataset, LanguageModelSAERunnerConfig
 from sae_lens.load_model import load_model
 from sae_lens.sae import SAE_CFG_PATH, SAE_WEIGHTS_PATH, SPARSITY_PATH
+from sae_lens.store.base_store import BaseStore
 from sae_lens.training.activations_store import ActivationsStore
 from sae_lens.training.geometric_median import compute_geometric_median
 from sae_lens.training.sae_trainer import SAETrainer
@@ -36,7 +37,7 @@ class SAETrainingRunner:
     cfg: LanguageModelSAERunnerConfig
     model: HookedRootModule
     sae: TrainingSAE
-    activations_store: ActivationsStore
+    activations_store: BaseStore
 
     def __init__(
         self,
@@ -44,6 +45,7 @@ class SAETrainingRunner:
         override_dataset: HfDataset | None = None,
         override_model: HookedRootModule | None = None,
         override_sae: TrainingSAE | None = None,
+        override_activation_store: BaseStore | None = None,
     ):
         if override_dataset is not None:
             logging.warning(
@@ -66,11 +68,14 @@ class SAETrainingRunner:
         else:
             self.model = override_model
 
-        self.activations_store = ActivationsStore.from_config(
-            self.model,
-            self.cfg,
-            override_dataset=override_dataset,
-        )
+        if override_activation_store is None:
+            self.activations_store = ActivationsStore.from_config(
+                self.model,
+                self.cfg,
+                override_dataset=override_dataset,
+            )
+        else:
+            self.activations_store = override_activation_store
 
         if override_sae is None:
             if self.cfg.from_pretrained_path is not None:
@@ -172,6 +177,7 @@ class SAETrainingRunner:
         extract all activations at a certain layer and use for sae b_dec initialization
         """
 
+        assert isinstance(self.activations_store, ActivationsStore)
         if self.cfg.b_dec_init_method == "geometric_median":
             layer_acts = self.activations_store.storage_buffer.detach()[:, 0, :]
             # get geometric median of the activations if we're using those.
