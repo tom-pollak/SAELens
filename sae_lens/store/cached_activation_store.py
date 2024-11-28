@@ -62,6 +62,7 @@ class CachedActivationsStore(BaseStore):
             ds=ds,
             column_names=[cfg.hook_name],
             batch_size=batch_size,
+            context_size=cfg.context_size,
         )
 
 
@@ -70,6 +71,7 @@ class CachedActivationsStore(BaseStore):
         ds: Dataset,
         column_names: list[str],
         batch_size: int,
+        context_size: int,
         dl_kwargs: Optional[dict[str, Any]] = None,
     ):
         self.ds = ds
@@ -77,6 +79,7 @@ class CachedActivationsStore(BaseStore):
 
         self.column_names = column_names
         self.batch_size = batch_size
+        self.context_size = context_size
         self.dl_kwargs = {} if dl_kwargs is None else dl_kwargs
         self.estimated_norm_scaling_factor = 1.0  # updated by SAETrainer
 
