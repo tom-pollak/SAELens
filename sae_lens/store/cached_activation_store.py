@@ -7,7 +7,6 @@ from typing import Any, Iterator, Optional
 import torch
 from datasets import Dataset
 from jaxtyping import Float
-
 from sae_lens.config import CacheActivationsRunnerConfig
 from sae_lens.store.base_store import BaseStore
 
@@ -53,32 +52,33 @@ class CachedActivationsStore(BaseStore):
             raise ValueError(
                 "You must specify a new_cached_activations_path in your config."
             )
+        activation_save_path = Path(cfg.new_cached_activations_path)
+        assert (
+            activation_save_path.exists()
+        ), f"Cache directory {activation_save_path} does not exist."
+        ds = Dataset.load_from_disk(activation_save_path)
 
         return cls(
-            activation_save_path=Path(cfg.new_cached_activations_path),
+            ds=ds,
             column_names=[cfg.hook_name],
             batch_size=batch_size,
         )
 
+
     def __init__(
         self,
-        activation_save_path: Path,
+        ds: Dataset,
         column_names: list[str],
         batch_size: int,
         dl_kwargs: Optional[dict[str, Any]] = None,
     ):
-        self.activation_save_path = activation_save_path
-        assert (
-            activation_save_path.exists()
-        ), f"Cache directory {activation_save_path} does not exist."
+        self.ds = ds
+        self.ds.set_format(type="torch", columns=self.column_names)
 
         self.column_names = column_names
         self.batch_size = batch_size
         self.dl_kwargs = {} if dl_kwargs is None else dl_kwargs
         self.estimated_norm_scaling_factor = 1.0  # updated by SAETrainer
-
-        self.ds = Dataset.load_from_disk(activation_save_path)
-        self.ds.set_format(type="torch", columns=self.column_names)
 
         feats = self.ds.features
         assert feats is not None
