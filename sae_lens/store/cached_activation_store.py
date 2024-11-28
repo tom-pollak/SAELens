@@ -83,13 +83,11 @@ class CachedActivationsStore(BaseStore):
         feats = self.ds.features
         assert feats is not None
         _first_feat = next(iter(feats.values()))
-        self.context_size, self.d_in = _first_feat.shape
+        self.d_in = _first_feat.length
+        assert self.d_in > 0, "d_in must be greater than 0"
         self.dtype = _first_feat.dtype
         for feat in feats.values():
-            assert feat.shape == (
-                self.context_size,
-                self.d_in,
-            ), "All features must have the same (context_size, d_in)"
+            assert feat.length == self.d_in, "All features must have the same length"
             assert feat.dtype == self.dtype, "All features must have the same dtype"
 
         self.dl = self._mk_cached_dl(self.dl_kwargs)
